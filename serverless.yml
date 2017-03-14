@@ -1,0 +1,71 @@
+service: survey-simian
+provider:
+  name: aws
+  runtime: nodejs4.3
+  region: us-east-1
+  stage: ${opt:stage, self:custom.defaultStage}
+  profile: ${self:custom.profiles.${self:provider.stage}}
+  environment:
+    REGION: ${opt:region, self:provider.region}
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - s3:PutObject
+      Resource: "arn:aws:s3:::${self:custom.bucketName}-${self:provider.stage}/*"
+    - Effect: Allow
+      Action:
+        - sqs:SendMessage
+        - sqs:ReceiveMessage
+        - sqs:DeleteMessage
+      Resource: "arn:aws:sqs:*:*:${self:custom.queueName}-${self:provider.stage}"
+
+custom:
+  defaultStage: staging
+  profiles:
+    staging: staging
+    prod: prod
+  bucketName: survey-simian
+  queueName: survey-simian
+
+functions:
+  save:
+    environment:
+      SQS_QUEUE_URL:
+        Ref: SQSQueue
+    handler: http.save
+    events:
+      - http:
+          path: save
+          method: post
+          cors: true
+  persist:
+    environment:
+      SQS_QUEUE_URL:
+        Ref: SQSQueue
+      BUCKET_NAME: "${self:custom.bucketName}-${self:provider.stage}"
+    handler: queue.save
+    events:
+      - schedule: rate(1 hour)
+
+resources:
+  Resources:
+    S3Bucket:
+      Type: AWS::S3::Bucket
+      DeletionPolicy: Retain
+      Properties:
+        BucketName: "${self:custom.bucketName}-${self:provider.stage}"
+        AccessControl: Private
+    SQSQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: "${self:custom.queueName}-${self:provider.stage}"
+
+plugins:
+  - serverless-plugin-optimize
+package:
+  individually: true
+
+Outputs:
+  QueueURL:
+    Value:
+      'Ref': SQSQueue
